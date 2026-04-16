@@ -13,7 +13,7 @@ Run the app with: `python app.py`
 
 ## Endpoints
 
-- GET /notes - Retrieve paginated list of notes (query params: page, per_page)
+- GET /notes - Retrieve list of notes
 - POST /notes - Create a new note (body: {title, content})
 - PATCH /notes/<id> - Update a note (body: {title, content})
 - DELETE /notes/<id> - Delete a note
