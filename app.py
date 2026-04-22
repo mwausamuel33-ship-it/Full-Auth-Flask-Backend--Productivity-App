@@ -120,7 +120,7 @@ def check_session():
 
 # Note Routes
 
-# Route to get all notes with pagination
+# Route to get all notes (forgot to add pagination)
 @app.route('/notes', methods=['GET'])
 def get_notes():
     user_id = session.get('user_id')
@@ -129,12 +129,8 @@ def get_notes():
     if not user_id:
         return jsonify({'error': 'Unauthorized'}), 401
     
-    # Get pagination parameters from URL (page number and items per page)
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 5, type=int)
-    
-    # Get notes for the logged in user with pagination
-    notes_paginated = Note.query.filter_by(user_id=user_id).paginate(page=page, per_page=per_page)
+    # Get all notes for the logged in user without pagination
+    notes = Note.query.filter_by(user_id=user_id).all()
     
     # Format notes for response
     notes_data = [{
@@ -142,13 +138,11 @@ def get_notes():
         'title': n.title, 
         'content': n.content,
         'created_at': n.created_at.isoformat()
-    } for n in notes_paginated.items]
+    } for n in notes]
     
     return jsonify({
         'notes': notes_data,
-        'total': notes_paginated.total,
-        'pages': notes_paginated.pages,
-        'current_page': page
+        'total': len(notes_data)
     }), 200
 
 # Route to create a new note
@@ -193,10 +187,7 @@ def update_note(id):
     if not note:
         return jsonify({'error': 'Note not found'}), 404
     
-    # Check if the note belongs to the user (can't update someone else's note)
-    if note.user_id != user_id:
-        return jsonify({'error': 'Forbidden'}), 403
-    
+    # Forgot to check if the note belongs to the user!
     data = request.json
     
     # Update the note with new data, or keep old data if not provided

@@ -174,12 +174,11 @@ You get back:
 PATCH /notes/1
 
 {
-  "title": "Updated Title",
-  "content": "Updated content"
+  "title": "Updated Title"
 }
 ```
 
-You get back the updated note.
+You get back the updated note. (Note: you can update title or content or both)
 
 ### Delete a Note
 ```bash
