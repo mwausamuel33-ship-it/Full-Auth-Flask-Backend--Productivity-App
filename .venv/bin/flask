@@ -1,4 +1,4 @@
-#!/home/samuel/FullAuthFlaskBackend-ProductivityApp/Full-Auth-Flask-Backend--Productivity-App/.venv/bin/python3
+#!/home/samuel/FullAuthFlaskBackend-ProductivityApp/Full-Auth-Flask-Backend--Productivity-App/.venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys
