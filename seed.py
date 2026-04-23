@@ -1,13 +1,18 @@
-from app import app, db, User, Note
-from flask_bcrypt import Bcrypt
+from app import app, db, bcrypt, User, Note
 
-bcrypt = Bcrypt()
+# This script seeds the database with some test users and notes
+# Run it with: python seed.py
 
-# Use app context
 with app.app_context():
-    db.create_all()
 
-    # Create some users
+    # delete existing data first so we can re-run this without errors
+    print('Clearing old data...')
+    Note.query.delete()
+    User.query.delete()
+    db.session.commit()
+
+    print('Creating users...')
+
     user1 = User(
         username='john_doe',
         email='john@example.com',
@@ -24,24 +29,29 @@ with app.app_context():
     db.session.add(user2)
     db.session.commit()
 
-    # Create notes for user1
-    for i in range(5):
+    print('Creating notes...')
+
+    # create 5 notes for john
+    for i in range(1, 6):
         note = Note(
-            title=f'John Note {i+1}',
-            content=f'This is note {i+1} from John',
+            title=f'John Note {i}',
+            content=f'This is note number {i} written by John.',
             user_id=user1.id
         )
         db.session.add(note)
 
-    # Create notes for user2
-    for i in range(5):
+    # create 5 notes for jane
+    for i in range(1, 6):
         note = Note(
-            title=f'Jane Note {i+1}',
-            content=f'This is note {i+1} from Jane',
+            title=f'Jane Note {i}',
+            content=f'This is note number {i} written by Jane.',
             user_id=user2.id
         )
         db.session.add(note)
 
     db.session.commit()
 
-    print('Seeded database with users and notes!')
+    print('Done! Database seeded successfully.')
+    print('Test accounts:')
+    print('  username: john_doe   | password: password123')
+    print('  username: jane_smith | password: password456')

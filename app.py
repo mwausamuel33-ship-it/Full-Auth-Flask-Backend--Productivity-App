@@ -1,232 +1,260 @@
-# Import stuff
+import os
 from flask import Flask, request, jsonify, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
+from flask_migrate import Migrate
 from datetime import datetime
 
-# Make the app
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///notes.db'
-app.config['SECRET_KEY'] = 'super_secret_key_change_this'
+
+# Configure the app - using SQLite because it's simple and doesn't need a separate server
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///notes.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'super_secret_key_change_this')
+
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
+migrate = Migrate(app, db)
 
-# Create the database tables
-with app.app_context():
-    db.create_all()
 
-# Define the User model
+# User model - stores account info
+# passwords are hashed so they're never stored as plain text
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     email = db.Column(db.String(100), unique=True, nullable=False)
     password = db.Column(db.String(200), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    # This makes it so notes are connected to users
+
+    # one user can have many notes
     notes = db.relationship('Note', backref='user', lazy=True, cascade='all, delete-orphan')
 
-# Define the Note model
+
+# Note model - each note belongs to a user
 class Note(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(100))
-    content = db.Column(db.Text)
+    title = db.Column(db.String(100), nullable=False)
+    content = db.Column(db.Text, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    # This connects the note to a user
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
-# Auth Routes
 
-# Route to sign up - creates a new user account
+# helper function to get the logged in user's id from the session
+def get_current_user_id():
+    return session.get('user_id')
+
+
+# ---- Auth Routes ----
+
+# Sign up - creates a new user account
 @app.route('/signup', methods=['POST'])
 def signup():
-    data = request.json
-    
-    # Check if username and email and password are provided
-    if not data.get('username') or not data.get('email') or not data.get('password'):
+    data = request.get_json()
+
+    # make sure all required fields are included
+    if not data or not data.get('username') or not data.get('email') or not data.get('password'):
         return jsonify({'error': 'Missing required fields'}), 400
-    
-    # Check if username already exists in the database
+
+    # check if someone already has that username
     existing_user = User.query.filter_by(username=data['username']).first()
     if existing_user:
-        return jsonify({'error': 'Username already exists'}), 400
-    
-    # Check if email already exists
+        return jsonify({'error': 'Username already taken'}), 400
+
+    # check if email is already registered
     existing_email = User.query.filter_by(email=data['email']).first()
     if existing_email:
-        return jsonify({'error': 'Email already exists'}), 400
-    
-    # Hash the password using bcrypt so it's not stored in plain text
+        return jsonify({'error': 'Email already registered'}), 400
+
+    # hash the password before saving - never store plain text passwords!
     hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-    
-    # Create new user object
-    new_user = User(username=data['username'], email=data['email'], password=hashed_password)
+
+    new_user = User(
+        username=data['username'],
+        email=data['email'],
+        password=hashed_password
+    )
     db.session.add(new_user)
     db.session.commit()
-    
-    # Set the session so user is logged in after signup
+
+    # log the user in right after signing up
     session['user_id'] = new_user.id
-    
+
     return jsonify({'message': 'User created successfully', 'user_id': new_user.id}), 201
 
-# Route to log in with username and password
+
+# Login - checks credentials and starts a session
 @app.route('/login', methods=['POST'])
 def login():
-    data = request.json
-    
-    # Check if username and password are provided
-    if not data.get('username') or not data.get('password'):
+    data = request.get_json()
+
+    if not data or not data.get('username') or not data.get('password'):
         return jsonify({'error': 'Missing username or password'}), 400
-    
-    # Find user by username
+
+    # look up the user by username
     user = User.query.filter_by(username=data['username']).first()
-    
-    # If user doesn't exist, return error
-    if not user:
+
+    # if user doesn't exist or password is wrong, return the same error message
+    # (don't tell them which one is wrong - that's a security thing I learned)
+    if not user or not bcrypt.check_password_hash(user.password, data['password']):
         return jsonify({'error': 'Invalid username or password'}), 401
-    
-    # Check if password is correct by comparing with hashed password
-    if not bcrypt.check_password_hash(user.password, data['password']):
-        return jsonify({'error': 'Invalid username or password'}), 401
-    
-    # Set session so user stays logged in
+
+    # save user id in session so they stay logged in
     session['user_id'] = user.id
-    
+
     return jsonify({'message': 'Logged in successfully', 'user_id': user.id}), 200
 
-# Route to log out - clears the session
+
+# Logout - clears the session
 @app.route('/logout', methods=['POST'])
 def logout():
     session.clear()
     return jsonify({'message': 'Logged out successfully'}), 200
 
-# Route to check if user is logged in and get their info
+
+# Check session - used by the frontend to see if the user is still logged in
 @app.route('/check_session', methods=['GET'])
 def check_session():
-    user_id = session.get('user_id')
-    
-    # If no user_id in session, user is not logged in
+    user_id = get_current_user_id()
+
     if not user_id:
         return jsonify({'error': 'Not logged in'}), 401
-    
-    # Get user from database
-    user = User.query.get(user_id)
+
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify({'error': 'User not found'}), 404
-    
-    # Return user info
-    return jsonify({'user_id': user.id, 'username': user.username, 'email': user.email}), 200
 
-# Note Routes
-
-# Route to get all notes (forgot to add pagination)
-@app.route('/notes', methods=['GET'])
-def get_notes():
-    user_id = session.get('user_id')
-    
-    # Check if user is logged in
-    if not user_id:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    # Get all notes for the logged in user without pagination
-    notes = Note.query.filter_by(user_id=user_id).all()
-    
-    # Format notes for response
-    notes_data = [{
-        'id': n.id, 
-        'title': n.title, 
-        'content': n.content,
-        'created_at': n.created_at.isoformat()
-    } for n in notes]
-    
     return jsonify({
-        'notes': notes_data,
-        'total': len(notes_data)
+        'user_id': user.id,
+        'username': user.username,
+        'email': user.email
     }), 200
 
-# Route to create a new note
-@app.route('/notes', methods=['POST'])
-def create_note():
-    user_id = session.get('user_id')
-    
-    # Check if user is logged in
+
+# ---- Notes Routes ----
+# All of these require the user to be logged in
+
+# Get all notes for the logged in user - supports pagination
+@app.route('/notes', methods=['GET'])
+def get_notes():
+    user_id = get_current_user_id()
+
     if not user_id:
         return jsonify({'error': 'Unauthorized'}), 401
-    
-    data = request.json
-    
-    # Check if title and content are provided
-    if not data.get('title') or not data.get('content'):
-        return jsonify({'error': 'Missing title or content'}), 400
-    
-    # Create new note for the user
-    new_note = Note(title=data['title'], content=data['content'], user_id=user_id)
+
+    # get page and per_page from query params, default to page 1 with 5 notes
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 5, type=int)
+
+    # only get notes that belong to the logged in user
+    paginated_notes = Note.query.filter_by(user_id=user_id).order_by(Note.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
+    notes_list = []
+    for note in paginated_notes.items:
+        notes_list.append({
+            'id': note.id,
+            'title': note.title,
+            'content': note.content,
+            'created_at': note.created_at.isoformat()
+        })
+
+    return jsonify({
+        'notes': notes_list,
+        'total': paginated_notes.total,
+        'pages': paginated_notes.pages,
+        'current_page': paginated_notes.page
+    }), 200
+
+
+# Create a new note
+@app.route('/notes', methods=['POST'])
+def create_note():
+    user_id = get_current_user_id()
+
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json()
+
+    if not data or not data.get('title') or not data.get('content'):
+        return jsonify({'error': 'Title and content are required'}), 400
+
+    new_note = Note(
+        title=data['title'],
+        content=data['content'],
+        user_id=user_id
+    )
     db.session.add(new_note)
     db.session.commit()
-    
+
     return jsonify({
-        'id': new_note.id, 
-        'title': new_note.title, 
+        'id': new_note.id,
+        'title': new_note.title,
         'content': new_note.content,
         'created_at': new_note.created_at.isoformat()
     }), 201
 
-# Route to update a note
+
+# Update a note by id
 @app.route('/notes/<int:id>', methods=['PATCH'])
 def update_note(id):
-    user_id = session.get('user_id')
-    
-    # Check if user is logged in
+    user_id = get_current_user_id()
+
     if not user_id:
         return jsonify({'error': 'Unauthorized'}), 401
-    
-    # Get the note from database
-    note = Note.query.get(id)
-    
+
+    note = db.session.get(Note, id)
+
     if not note:
         return jsonify({'error': 'Note not found'}), 404
-    
-    # Forgot to check if the note belongs to the user!
-    data = request.json
-    
-    # Update the note with new data, or keep old data if not provided
-    note.title = data.get('title', note.title)
-    note.content = data.get('content', note.content)
+
+    # make sure the note belongs to the logged in user
+    if note.user_id != user_id:
+        return jsonify({'error': 'Forbidden - this note belongs to another user'}), 403
+
+    data = request.get_json()
+
+    # only update fields that were actually sent
+    if data.get('title'):
+        note.title = data['title']
+    if data.get('content'):
+        note.content = data['content']
+
     db.session.commit()
-    
+
     return jsonify({
-        'id': note.id, 
-        'title': note.title, 
+        'id': note.id,
+        'title': note.title,
         'content': note.content,
         'created_at': note.created_at.isoformat()
     }), 200
 
-# Route to delete a note
+
+# Delete a note by id
 @app.route('/notes/<int:id>', methods=['DELETE'])
 def delete_note(id):
-    user_id = session.get('user_id')
-    
-    # Check if user is logged in
+    user_id = get_current_user_id()
+
     if not user_id:
         return jsonify({'error': 'Unauthorized'}), 401
-    
-    # Get the note from database
-    note = Note.query.get(id)
-    
+
+    note = db.session.get(Note, id)
+
     if not note:
         return jsonify({'error': 'Note not found'}), 404
-    
-    # Check if the note belongs to the user (can't delete someone else's note)
+
+    # users should only be able to delete their own notes
     if note.user_id != user_id:
-        return jsonify({'error': 'Forbidden'}), 403
-    
-    # Delete the note
+        return jsonify({'error': 'Forbidden - this note belongs to another user'}), 403
+
     db.session.delete(note)
     db.session.commit()
-    
-    return jsonify({'message': 'Note deleted'}), 200
 
-# Run the app
+    return jsonify({'message': 'Note deleted successfully'}), 200
+
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    # debug mode is on by default for development, set FLASK_DEBUG=0 to turn it off
+    debug_mode = os.environ.get('FLASK_DEBUG', '1') == '1'
+    app.run(debug=debug_mode)
