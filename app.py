@@ -150,14 +150,10 @@ def get_notes():
         page=page, per_page=per_page, error_out=False
     )
 
-    notes_list = []
-    for note in paginated_notes.items:
-        notes_list.append({
-            'id': note.id,
-            'title': note.title,
-            'content': note.content,
-            'created_at': note.created_at.isoformat()
-        })
+    notes_list = [
+        {'id': note.id, 'title': note.title, 'content': note.content, 'created_at': note.created_at.isoformat()}
+        for note in paginated_notes.items
+    ]
 
     return jsonify({
         'notes': notes_list,
